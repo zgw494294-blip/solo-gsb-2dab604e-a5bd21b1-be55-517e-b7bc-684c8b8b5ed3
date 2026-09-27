@@ -1,4 +1,6 @@
 """晚点来源追踪（延误归因）：根源识别、传导链回溯、并列保留、输入校验与 API。"""
+import json
+import os
 from datetime import datetime
 
 import pytest
@@ -119,7 +121,9 @@ def test_unaffected_train_has_empty_roots():
 
 
 def test_ineffective_initial_delay_not_root():
-    # T2 自己填了 5 分钟首发延误，但区间清空约束更紧（支配），只有 T1 的延误起作用
+    # T2 自己填了 5 分钟首发延误，但区间清空约束更紧（支配），T2 自己的延误不起作用；
+    # 前车 T1 已晚点，且原时刻表本就违反清空间隔（08:20 < 08:30+10），
+    # 首发延误与区间冲突两个根源并列保留
     timetable = tt([
         train("T1", [("A", None, hm("08:00")), ("B", hm("08:30"), None)]),
         train("T2", [("A", None, hm("08:20")), ("B", hm("08:50"), None)]),
@@ -127,9 +131,14 @@ def test_ineffective_initial_delay_not_root():
     result = attribute(timetable, ["T1", "T2"], {"T1": 20, "T2": 5}, 10)
     item = entry(result, "T2")
     assert item["final_delay_minutes"] == 40  # 09:00 发、09:30 到
-    assert [(r["type"], r["train_id"]) for r in item["roots"]] == [
-        ("initial_delay", "T1"),
-    ]
+    got = sorted((r["type"], r.get("train_id")) for r in item["roots"])
+    assert got == [("initial_delay", "T1"), ("section_conflict", None)]
+    conflict = next(r for r in item["roots"] if r["type"] == "section_conflict")
+    assert conflict["shortfall_minutes"] == 20  # 08:30 + 10 - 08:20（按原定时刻）
+    assert conflict["ahead"]["original_arrive"] == dt("08:30")
+    assert conflict["ahead"]["arrive"] == dt("08:50")  # 前车调整后到达
+    assert conflict["follow"]["original_depart"] == dt("08:20")
+    assert conflict["follow"]["depart"] == dt("09:00")
 
 
 # ---------- 区间冲突根源（原时刻表本就违反清空间隔） ----------
@@ -152,6 +161,7 @@ def test_section_conflict_root_original_violation():
     assert root["shortfall_minutes"] == 5  # 08:30 + 10 - 08:35
     assert root["ahead"] == {
         "train_id": "T1", "stop_index": 0, "from": "A", "to": "B",
+        "original_depart": dt("08:00"), "original_arrive": dt("08:30"),
         "depart": dt("08:00"), "arrive": dt("08:30"),
     }
     assert root["follow"] == {
@@ -292,7 +302,8 @@ def test_middle_stop_dwell_extended_chain():
 # ---------- 并列约束保留全部根源 ----------
 
 def test_tied_initial_delay_and_clearance_keep_all_roots():
-    # T2 首发下界（08:20+30）与区间清空下界（T1 到达 08:40+10）恰好同为 08:50
+    # T2 首发下界（08:20+30）与区间清空下界（T1 到达 08:40+10）恰好同为 08:50；
+    # 原时刻表也违反清空间隔（08:20 < 08:30+10）：三个根源并列保留
     timetable = tt([
         train("T1", [("A", None, hm("08:00")), ("B", hm("08:30"), None)]),
         train("T2", [("A", None, hm("08:20")), ("B", hm("08:50"), None)]),
@@ -300,19 +311,32 @@ def test_tied_initial_delay_and_clearance_keep_all_roots():
     result = attribute(timetable, ["T1", "T2"], {"T1": 10, "T2": 30}, 10)
     item = entry(result, "T2")
     assert item["final_delay_minutes"] == 30
-    got = [(r["type"], r["train_id"]) for r in item["roots"]]
-    assert sorted(got) == [("initial_delay", "T1"), ("initial_delay", "T2")]
-    by_train = {r["train_id"]: r for r in item["roots"]}
+    got = [(r["type"], r.get("train_id")) for r in item["roots"]]
+    assert sorted(got) == [
+        ("initial_delay", "T1"),
+        ("initial_delay", "T2"),
+        ("section_conflict", None),
+    ]
+    by_train = {r.get("train_id"): r for r in item["roots"]}
     assert chain_steps(by_train["T1"])[0] == (
         "T1", 0, "depart", "initial_delay", dt("08:10"))
     assert chain_steps(by_train["T2"]) == [
         ("T2", 0, "depart", "initial_delay", dt("08:50")),
         ("T2", 1, "arrive", "run", dt("09:20")),
     ]
+    conflict = by_train[None]
+    assert conflict["shortfall_minutes"] == 20  # 08:30 + 10 - 08:20（按原定时刻）
+    assert chain_steps(conflict) == [
+        ("T1", 0, "depart", "section_conflict", dt("08:10")),
+        ("T1", 1, "arrive", "run", dt("08:40")),
+        ("T2", 0, "depart", "clearance", dt("08:50")),
+        ("T2", 1, "arrive", "run", dt("09:20")),
+    ]
 
 
 def test_tied_dwell_and_clearance_keep_all_roots():
-    # T2 在中间站 B：停留下界（自身到达 09:25+10）与清空下界（T1 到达 09:25+10）并列
+    # T2 在中间站 B：停留下界（自身到达 09:25+10）与清空下界（T1 到达 09:25+10）并列；
+    # 原时刻表也违反清空间隔（08:50 < 08:55+10）：三个根源并列保留
     timetable = tt([
         train("T1", [("B", None, hm("08:25")), ("C", hm("08:55"), None)]),
         train("T2", [
@@ -324,9 +348,13 @@ def test_tied_dwell_and_clearance_keep_all_roots():
     result = attribute(timetable, ["T1", "T2"], {"T1": 30, "T2": 45}, 10)
     item = entry(result, "T2")
     assert item["final_delay_minutes"] == 45
-    got = [(r["type"], r["train_id"]) for r in item["roots"]]
-    assert sorted(got) == [("initial_delay", "T1"), ("initial_delay", "T2")]
-    by_train = {r["train_id"]: r for r in item["roots"]}
+    got = [(r["type"], r.get("train_id")) for r in item["roots"]]
+    assert sorted(got) == [
+        ("initial_delay", "T1"),
+        ("initial_delay", "T2"),
+        ("section_conflict", None),
+    ]
+    by_train = {r.get("train_id"): r for r in item["roots"]}
     # 经区间清空回溯到 T1 的首发延误
     assert chain_steps(by_train["T1"]) == [
         ("T1", 0, "depart", "initial_delay", dt("08:55")),
@@ -339,6 +367,15 @@ def test_tied_dwell_and_clearance_keep_all_roots():
         ("T2", 0, "depart", "initial_delay", dt("08:55")),
         ("T2", 1, "arrive", "run", dt("09:25")),
         ("T2", 1, "depart", "dwell", dt("09:35")),
+        ("T2", 2, "arrive", "run", dt("10:05")),
+    ]
+    # 原表区间冲突：缺口按原定时刻计算（08:55 + 10 - 08:50）
+    conflict = by_train[None]
+    assert conflict["shortfall_minutes"] == 15
+    assert chain_steps(conflict) == [
+        ("T1", 0, "depart", "section_conflict", dt("08:55")),
+        ("T1", 1, "arrive", "run", dt("09:25")),
+        ("T2", 1, "depart", "clearance", dt("09:35")),
         ("T2", 2, "arrive", "run", dt("10:05")),
     ]
 
@@ -357,6 +394,101 @@ def test_tied_section_conflict_and_initial_delay_keep_all_roots():
         (r["type"], r.get("train_id")) for r in item["roots"]
     )
     assert got == [("initial_delay", "T2"), ("section_conflict", None)]
+
+
+# ---------- 前车晚点且原表也违反清空：两类根源并列 ----------
+
+SAMPLE_TIMETABLE = os.path.join(
+    os.path.dirname(__file__), "..", "sample_data", "timetable.json"
+)
+
+
+def test_ahead_delayed_and_original_violation_keep_both_roots():
+    # 示例时刻表 G101/G888：G101 首发延误 20 分钟、区间清空 10 分钟。
+    # G101 原定 10:00 到达 JNZ 与 G888 原定 08:50 发车之间本就违反清空间隔，
+    # 首发延误与原表区间冲突两个根源必须并列返回，各附一条连到 G888 末到的传导链
+    with open(SAMPLE_TIMETABLE, encoding="utf-8") as f:
+        timetable = validate_timetable(json.load(f))
+    result = attribute(timetable, ["G101", "G888"], {"G101": 20}, 10)
+    item = entry(result, "G888")
+    assert item["final_delay_minutes"] == 100  # 10:30 发、11:55 到
+    assert item["original_final_arrive"] == dt("10:15")
+    assert item["final_arrive"] == dt("11:55")
+    assert [r["type"] for r in item["roots"]] == ["initial_delay", "section_conflict"]
+
+    delay, conflict = item["roots"]
+    assert (delay["train_id"], delay["delay_minutes"]) == ("G101", 20)
+    assert chain_steps(delay) == [
+        ("G101", 0, "depart", "initial_delay", dt("08:20")),
+        ("G101", 1, "arrive", "run", dt("09:00")),
+        ("G101", 1, "depart", "dwell", dt("09:05")),
+        ("G101", 2, "arrive", "run", dt("10:20")),
+        ("G888", 0, "depart", "clearance", dt("10:30")),
+        ("G888", 1, "arrive", "run", dt("11:55")),
+    ]
+
+    assert conflict["section"] == ["JNZ", "TJP"]
+    assert conflict["clearance_minutes"] == 10
+    # 缺口按原定时刻计算：G101 原定 10:00 到 + 清空 10 分钟 - G888 原定 08:50 发
+    assert conflict["shortfall_minutes"] == 80
+    # 前车本次已晚点：原定与调整时刻并列给出，不得按正点处理
+    assert conflict["ahead"]["original_depart"] == dt("08:45")
+    assert conflict["ahead"]["original_arrive"] == dt("10:00")
+    assert conflict["ahead"]["depart"] == dt("09:05")
+    assert conflict["ahead"]["arrive"] == dt("10:20")
+    assert conflict["follow"]["original_depart"] == dt("08:50")
+    assert conflict["follow"]["depart"] == dt("10:30")
+    assert chain_steps(conflict) == [
+        ("G101", 1, "depart", "section_conflict", dt("09:05")),
+        ("G101", 2, "arrive", "run", dt("10:20")),
+        ("G888", 0, "depart", "clearance", dt("10:30")),
+        ("G888", 1, "arrive", "run", dt("11:55")),
+    ]
+
+
+def test_multi_section_propagation_keeps_all_roots():
+    # 前车晚点 + 两个区间原表均违反清空：跨班、多区间传播保留全部适用根源
+    timetable = tt([
+        train("T1", [
+            ("A", None, hm("08:00")),
+            ("B", hm("08:30"), hm("08:35")),
+            ("C", hm("09:05"), None),
+        ]),
+        train("T2", [
+            ("A", None, hm("08:20")),
+            ("B", hm("08:50"), hm("08:55")),
+            ("C", hm("09:20"), None),
+        ]),
+    ])
+    result = attribute(timetable, ["T1", "T2"], {"T1": 10}, 10)
+    item = entry(result, "T2")
+    assert item["final_delay_minutes"] == 30
+    got = sorted((r["type"], tuple(r.get("section") or ()), r.get("train_id"))
+                 for r in item["roots"])
+    assert got == [
+        ("initial_delay", (), "T1"),
+        ("section_conflict", ("A", "B"), None),
+        ("section_conflict", ("B", "C"), None),
+    ]
+    conflicts = {tuple(r["section"]): r for r in item["roots"]
+                 if r["type"] == "section_conflict"}
+    # 缺口均按原定时刻：08:30+10-08:20 与 09:05+10-08:55
+    assert conflicts[("A", "B")]["shortfall_minutes"] == 20
+    assert conflicts[("B", "C")]["shortfall_minutes"] == 20
+    assert chain_steps(conflicts[("A", "B")]) == [
+        ("T1", 0, "depart", "section_conflict", dt("08:10")),
+        ("T1", 1, "arrive", "run", dt("08:40")),
+        ("T2", 0, "depart", "clearance", dt("08:50")),
+        ("T2", 1, "arrive", "run", dt("09:20")),
+        ("T2", 1, "depart", "dwell", dt("09:25")),
+        ("T2", 2, "arrive", "run", dt("09:50")),
+    ]
+    assert chain_steps(conflicts[("B", "C")]) == [
+        ("T1", 1, "depart", "section_conflict", dt("08:45")),
+        ("T1", 2, "arrive", "run", dt("09:15")),
+        ("T2", 1, "depart", "clearance", dt("09:25")),
+        ("T2", 2, "arrive", "run", dt("09:50")),
+    ]
 
 
 # ---------- 结果结构与输入校验 ----------
@@ -475,18 +607,33 @@ def test_api_delay_attribution_ok(client):
     ]
     assert [s["station"] for s in root["chain"]] == ["A", "B", "B", "C"]
 
-    # T2：末到延误 30 分钟，根源是 T1 的首发延误，链经清空与停留约束传导
+    # T2：末到延误 30 分钟；首发延误（T1）与原表区间冲突（A↔B 缺口 20 分钟）并列
     assert t2["final_delay_minutes"] == 30
     assert t2["final_arrive"] == "2026-10-01T09:50"
-    assert len(t2["roots"]) == 1
-    root = t2["roots"][0]
-    assert root["type"] == "initial_delay"
+    assert len(t2["roots"]) == 2
+    root = next(r for r in t2["roots"] if r["type"] == "initial_delay")
     assert root["train_id"] == "T1"
     assert [
         (s["train_id"], s["stop_index"], s["event"], s["constraint"], s["time"])
         for s in root["chain"]
     ] == [
         ("T1", 0, "depart", "initial_delay", "2026-10-01T08:10"),
+        ("T1", 1, "arrive", "run", "2026-10-01T08:40"),
+        ("T2", 0, "depart", "clearance", "2026-10-01T08:50"),
+        ("T2", 1, "arrive", "run", "2026-10-01T09:20"),
+        ("T2", 1, "depart", "dwell", "2026-10-01T09:25"),
+        ("T2", 2, "arrive", "run", "2026-10-01T09:50"),
+    ]
+    conflict = next(r for r in t2["roots"] if r["type"] == "section_conflict")
+    assert conflict["section"] == ["A", "B"]
+    assert conflict["shortfall_minutes"] == 20  # 08:30 + 10 - 08:20（按原定时刻）
+    assert conflict["ahead"]["original_arrive"] == "2026-10-01T08:30"
+    assert conflict["ahead"]["arrive"] == "2026-10-01T08:40"  # 前车已晚点，非正点
+    assert [
+        (s["train_id"], s["stop_index"], s["event"], s["constraint"], s["time"])
+        for s in conflict["chain"]
+    ] == [
+        ("T1", 0, "depart", "section_conflict", "2026-10-01T08:10"),
         ("T1", 1, "arrive", "run", "2026-10-01T08:40"),
         ("T2", 0, "depart", "clearance", "2026-10-01T08:50"),
         ("T2", 1, "arrive", "run", "2026-10-01T09:20"),
@@ -516,6 +663,7 @@ def test_api_delay_attribution_section_conflict(client):
     assert root["shortfall_minutes"] == 25  # 08:30 + 15 - 08:20
     assert root["ahead"] == {
         "train_id": "T1", "stop_index": 0, "from": "A", "to": "B",
+        "original_depart": "2026-10-01T08:00", "original_arrive": "2026-10-01T08:30",
         "depart": "2026-10-01T08:00", "arrive": "2026-10-01T08:30",
     }
     assert root["follow"] == {

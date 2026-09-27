@@ -940,10 +940,17 @@ function renderAttrRootHead(root) {
       ${esc(stationLabel(root.station))} 首发延误 ${fmtDuration(root.delay_minutes)}
       （原定 ${fmtTime(root.original_depart)} → 调整 ${fmtTime(root.adjusted_depart)}）`;
   }
+  const aheadDelay = Math.round(
+    (new Date(root.ahead.arrive) - new Date(root.ahead.original_arrive)) / 60000
+  );
+  const aheadBadge = aheadDelay > 0
+    ? `<span class="badge-delayed">晚点 ${fmtDuration(aheadDelay)}</span>`
+    : '<span class="badge-ontime">正点</span>';
   return `区间冲突 — ${esc(stationLabel(root.section[0]))} ↔ ${esc(stationLabel(root.section[1]))}
     区间原时刻表已违反清空 ${root.clearance_minutes} 分钟（缺口 ${root.shortfall_minutes} 分钟）：
     前车 <strong>${esc(root.ahead.train_id)}</strong>（停靠 #${root.ahead.stop_index}，
-    ${fmtTime(root.ahead.depart)} 发 → ${fmtTime(root.ahead.arrive)} 到）正点，
+    原定 ${fmtTime(root.ahead.original_depart)} 发 → ${fmtTime(root.ahead.original_arrive)} 到，
+    调整 ${fmtTime(root.ahead.depart)} 发 → ${fmtTime(root.ahead.arrive)} 到）${aheadBadge}，
     后车 <strong>${esc(root.follow.train_id)}</strong>（停靠 #${root.follow.stop_index}）
     原定 ${fmtTime(root.follow.original_depart)} 发车，被迫推迟至 ${fmtTime(root.follow.depart)}`;
 }

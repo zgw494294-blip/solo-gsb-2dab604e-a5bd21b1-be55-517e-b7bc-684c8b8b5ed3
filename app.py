@@ -683,6 +683,8 @@ def create_app():
                 "stop_index": passage["stop_index"],
                 "from": passage["from"],
                 "to": passage["to"],
+                "original_depart": planner.format_time(passage["original_depart"]),
+                "original_arrive": planner.format_time(passage["original_arrive"]),
                 "depart": planner.format_time(passage["depart"]),
                 "arrive": planner.format_time(passage["arrive"]),
             }
