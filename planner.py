@@ -1383,14 +1383,16 @@ def attribute_delay_propagation(timetable, train_ids, initial_delays, clearance_
     回溯。根源只有两类：
     - 起作用的首发延误：某班首发下界（原时刻 + 首发延误）恰好等于排程时刻；
     - 区间冲突：原时刻表本就违反所填清空间隔——顺序相邻的两次不同班次通过中，
-      后车原发车时刻早于前车原到达时刻 + 清空间隔，且前车正点（无更早根源）。
+      后车原发车时刻早于前车原到达时刻 + 清空间隔（无论前车本次是否晚点，
+      缺口按原定时刻计算）。
 
     回溯规则（与排程约束一一对应）：
     - 班内运行：到达时刻 = 上一站调整后发车 + 原运行时长，唯一前驱；
     - 站内停留：仅当 调整后到达 + 原停留时长 恰好等于本次排程发车时刻时回溯；
     - 区间清空：仅当 前一次通过的调整后到达 + 清空间隔 恰好等于本次排程发车
-      时刻时，沿固定区间顺序回溯到该次通过；前车正点时该约束边即区间冲突根源，
-      否则继续向前车的到达时刻回溯；
+      时刻时，沿固定区间顺序回溯到该次通过；此时分别判断——原时刻表本就违反
+      清空间隔的，该约束边即区间冲突根源；前车本次已晚点的，同时继续向前车的
+      到达时刻回溯其晚点根源。两者独立成立时根源并列；
     - 只回溯下界恰好等于本次排程时刻的约束；同一时刻多个约束并列（下界同时
       取等）时全部回溯，保留全部根源；同一根源经多条路径到达时只保留一条链。
 
@@ -1475,9 +1477,11 @@ def attribute_delay_propagation(timetable, train_ids, initial_delays, clearance_
                 if ahead_arrive + clearance == moment:
                     ptid, psidx = pred
                     ahead_original = trains_by_id[ptid]["stops"][psidx + 1]["arrive"]
-                    if ahead_arrive == ahead_original:
-                        # 前车正点仍被迫推迟：原时刻表本就违反清空间隔，
-                        # 根源是这两次通过之间的区间冲突
+                    # 原表冲突与前车本次晚点分别判断，两者独立成立时根源并列
+                    if ahead_original + clearance > original:
+                        # 原时刻表本就违反清空间隔（后车原发车早于前车原到达 +
+                        # 清空）：根源是这两次通过之间的区间冲突，无论前车本次
+                        # 是否晚点都成立
                         roots.setdefault(
                             ("section_conflict", ptid, psidx, tid, sidx),
                             [
@@ -1489,8 +1493,8 @@ def attribute_delay_propagation(timetable, train_ids, initial_delays, clearance_
                                            "clearance", moment),
                             ],
                         )
-                    else:
-                        # 前车自身晚点：继续向前车的到达时刻回溯
+                    if ahead_arrive > ahead_original:
+                        # 前车本次已晚点：继续向前车的到达时刻回溯其晚点根源
                         for root, chain in trace_arrive(ptid, psidx + 1).items():
                             roots.setdefault(
                                 root,
@@ -1529,6 +1533,8 @@ def attribute_delay_propagation(timetable, train_ids, initial_delays, clearance_
                 "stop_index": psidx,
                 "from": ahead_stop["station"],
                 "to": ahead_next["station"],
+                "original_depart": ahead_stop["depart"],
+                "original_arrive": ahead_next["arrive"],
                 "depart": adjusted_depart[(ptid, psidx)],
                 "arrive": ahead_arrive,
             },
@@ -1540,9 +1546,9 @@ def attribute_delay_propagation(timetable, train_ids, initial_delays, clearance_
                 "original_depart": follow_stop["depart"],
                 "depart": adjusted_depart[(ctid, csidx)],
             },
-            # 原时刻表违反清空间隔的缺口：前车原到达 + 清空 - 后车原发车
+            # 原时刻表违反清空间隔的缺口：前车原到达 + 清空 - 后车原发车（按原定时刻）
             "shortfall_minutes": int(
-                (ahead_arrive + clearance - follow_stop["depart"]).total_seconds() // 60
+                (ahead_next["arrive"] + clearance - follow_stop["depart"]).total_seconds() // 60
             ),
             "chain": chain,
         }
