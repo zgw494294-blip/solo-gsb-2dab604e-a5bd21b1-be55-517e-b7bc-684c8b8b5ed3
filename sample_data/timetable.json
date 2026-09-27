@@ -1,0 +1,76 @@
+{
+  "stations": [
+    {"id": "BJS", "name": "北京", "transfer_minutes": 10},
+    {"id": "TJP", "name": "天津", "transfer_minutes": 5},
+    {"id": "JNZ", "name": "济南", "transfer_minutes": 10},
+    {"id": "XUZ", "name": "徐州", "transfer_minutes": 8},
+    {"id": "NJN", "name": "南京", "transfer_minutes": 8},
+    {"id": "SHH", "name": "上海", "transfer_minutes": 12},
+    {"id": "HZH", "name": "杭州", "transfer_minutes": 6}
+  ],
+  "trains": [
+    {
+      "id": "G101",
+      "stops": [
+        {"station": "BJS", "arrive": null, "depart": "2026-10-01T08:00"},
+        {"station": "TJP", "arrive": "2026-10-01T08:40", "depart": "2026-10-01T08:45"},
+        {"station": "JNZ", "arrive": "2026-10-01T10:00", "depart": "2026-10-01T10:05"},
+        {"station": "NJN", "arrive": "2026-10-01T12:00", "depart": "2026-10-01T12:05"},
+        {"station": "SHH", "arrive": "2026-10-01T13:30", "depart": null}
+      ]
+    },
+    {
+      "id": "G203",
+      "stops": [
+        {"station": "BJS", "arrive": null, "depart": "2026-10-01T09:00"},
+        {"station": "JNZ", "arrive": "2026-10-01T11:10", "depart": "2026-10-01T11:15"},
+        {"station": "SHH", "arrive": "2026-10-01T13:50", "depart": null}
+      ]
+    },
+    {
+      "id": "D305",
+      "stops": [
+        {"station": "JNZ", "arrive": null, "depart": "2026-10-01T10:20"},
+        {"station": "XUZ", "arrive": "2026-10-01T11:20", "depart": "2026-10-01T11:25"},
+        {"station": "NJN", "arrive": "2026-10-01T12:20", "depart": "2026-10-01T12:25"},
+        {"station": "HZH", "arrive": "2026-10-01T14:00", "depart": null}
+      ]
+    },
+    {
+      "id": "G515",
+      "stops": [
+        {"station": "NJN", "arrive": null, "depart": "2026-10-01T12:30"},
+        {"station": "HZH", "arrive": "2026-10-01T14:10", "depart": null}
+      ]
+    },
+    {
+      "id": "G517",
+      "stops": [
+        {"station": "NJN", "arrive": null, "depart": "2026-10-01T12:30"},
+        {"station": "HZH", "arrive": "2026-10-01T14:10", "depart": null}
+      ]
+    },
+    {
+      "id": "G888",
+      "stops": [
+        {"station": "TJP", "arrive": null, "depart": "2026-10-01T08:50"},
+        {"station": "JNZ", "arrive": "2026-10-01T10:15", "depart": null}
+      ]
+    },
+    {
+      "id": "D999",
+      "stops": [
+        {"station": "TJP", "arrive": null, "depart": "2026-10-01T08:43"},
+        {"station": "JNZ", "arrive": "2026-10-01T09:50", "depart": null}
+      ]
+    },
+    {
+      "id": "K777",
+      "stops": [
+        {"station": "SHH", "arrive": null, "depart": "2026-10-01T22:30"},
+        {"station": "HZH", "arrive": "2026-10-01T23:45", "depart": "2026-10-01T23:50"},
+        {"station": "NJN", "arrive": "2026-10-02T02:10", "depart": null}
+      ]
+    }
+  ]
+}

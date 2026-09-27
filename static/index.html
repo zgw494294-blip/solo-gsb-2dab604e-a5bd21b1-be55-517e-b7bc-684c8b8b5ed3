@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>列车换乘规划</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>🚄 列车换乘规划</h1>
+    <p id="timetable-status">正在加载时刻表…</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>查询行程</h2>
+      <div class="form-row">
+        <label>起点
+          <select id="origin"></select>
+        </label>
+        <label>终点
+          <select id="destination"></select>
+        </label>
+        <label>最早出发时间
+          <input type="datetime-local" id="earliest" value="2026-10-01T08:00">
+        </label>
+        <button id="search-btn" class="primary">查询最早到达</button>
+      </div>
+      <div id="result"></div>
+    </section>
+
+    <section class="card">
+      <h2>站台分配（单站）</h2>
+      <p class="hint">选择站点与站台数量（1～4），为经过该站的每次停靠分配站台。
+        可选预锁：按班次 ID 与从 0 起的停靠序号，把某次停靠锁定到指定站台。</p>
+      <div class="form-row">
+        <label>站点
+          <select id="plan-station"></select>
+        </label>
+        <label>站台数量
+          <select id="plan-platforms">
+            <option value="1">1</option>
+            <option value="2" selected>2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </label>
+        <button id="add-lock-btn" type="button">添加预锁</button>
+        <button id="plan-btn" class="primary">生成站台方案</button>
+      </div>
+      <div id="lock-list"></div>
+      <div id="plan-result"></div>
+    </section>
+
+    <section class="card">
+      <h2>单线区间冲突排查</h2>
+      <p class="hint">选择当前时刻表中有直接相邻停靠的两个站点（任一方向），输入 0～30 分钟
+        清空间隔，检查该单线区间内各班次的占用冲突，并给出需暂缓调整的最少班次建议。
+        分析不修改时刻表。</p>
+      <div class="form-row">
+        <label>区间（相邻站点）
+          <select id="section-pair"></select>
+        </label>
+        <label>清空间隔（分钟）
+          <input type="number" id="section-clearance" min="0" max="30" step="1" value="10">
+        </label>
+        <button id="section-btn" class="primary">排查冲突</button>
+      </div>
+      <div id="section-result"></div>
+    </section>
+
+    <section class="card">
+      <h2>车底接续规划</h2>
+      <p class="hint">勾选当前时刻表中 1～60 个不重复班次并填写 1～120 分钟整备时间，
+        计算执行所选班次最少需要多少组可互换车底。仅当前班终站等于后班首站、
+        且后班发车不早于前班到达加整备时间时方可接续（不允许空驶，按完整日期计算）；
+        先最少化车底组数，再最小化接续等待总分钟数。分析不修改时刻表。</p>
+      <div class="form-row">
+        <label>整备时间（分钟）
+          <input type="number" id="stock-turnaround" min="1" max="120" step="1" value="30">
+        </label>
+        <button id="stock-select-all" type="button">全选（前 60 个）</button>
+        <button id="stock-clear" type="button">清空选择</button>
+        <span id="stock-count" class="hint">已选 0 个班次</span>
+        <button id="stock-btn" class="primary">生成接续方案</button>
+      </div>
+      <div id="stock-train-list" class="stock-list"></div>
+      <div id="stock-result"></div>
+    </section>
+
+    <section class="card">
+      <h2>限座旅客疏运测算</h2>
+      <p class="hint">选择起终站与时间窗（最早出发、最晚到达，按完整日期比较），勾选 1～60 个班次
+        并为每班填写 1～10000 的整数席位数（所选班次总停靠数不超过 300）。测算时间窗内最多可送达人数：
+        只使用所选班次，同一相邻停靠区段乘车人数不超过席位，下车后席位可复用；同车沿后续停靠前进无需换乘时间，
+        换车须满足本站换乘分钟数。可分多条行程送达；测算不写库。</p>
+      <div class="form-row">
+        <label>起点
+          <select id="flow-origin"></select>
+        </label>
+        <label>终点
+          <select id="flow-destination"></select>
+        </label>
+        <label>最早出发时间
+          <input type="datetime-local" id="flow-earliest" value="2026-10-01T08:00">
+        </label>
+        <label>最晚到达时间
+          <input type="datetime-local" id="flow-deadline" value="2026-10-02T23:59">
+        </label>
+        <button id="flow-select-all" type="button">全选（前 60 个）</button>
+        <button id="flow-clear" type="button">清空选择</button>
+        <span id="flow-count" class="hint">已选 0 个班次，总停靠 0 个</span>
+        <button id="flow-btn" class="primary">开始测算</button>
+      </div>
+      <div id="flow-train-list" class="stock-list"></div>
+      <div id="flow-result"></div>
+    </section>
+
+    <section class="card">
+      <h2>区间延误传播排程</h2>
+      <p class="hint">勾选当前时刻表中 1～40 个班次（所选班次总停靠数不超过 200），为需要晚点的班次
+        填写 0～120 分钟首发延误（未填按 0），并填写 0～30 分钟区间清空时间。相邻站点的无向站对视为
+        同一单线区间，区间内通过顺序按原定发车时间固定，前车到达加清空时间后后车才能发车；各班首发
+        不早于原时刻加指定延误，其余到发不早于原时刻，区间运行时长不变、站内停留不少于原定时长。
+        计算给出所有到发时刻逐项最早的可行排程与末到延误；计算不修改时刻表。
+        生成排程后可点击“查看归因”：对同一输入追踪每个晚点班次的末到根源
+        （起作用的首发延误、原时刻表本就违反清空间隔的区间冲突）及传导链。</p>
+      <div class="form-row">
+        <label>区间清空时间（分钟）
+          <input type="number" id="delay-clearance" min="0" max="30" step="1" value="10">
+        </label>
+        <button id="delay-select-all" type="button">全选（前 40 个）</button>
+        <button id="delay-clear" type="button">清空选择</button>
+        <span id="delay-count" class="hint">已选 0 个班次，总停靠 0 个</span>
+        <button id="delay-btn" class="primary">生成排程</button>
+        <button id="delay-attr-btn" type="button">查看归因</button>
+      </div>
+      <div id="delay-train-list" class="stock-list"></div>
+      <div id="delay-result"></div>
+      <div id="delay-attribution"></div>
+    </section>
+
+    <section class="card">
+      <h2>导入时刻表</h2>
+      <p class="hint">粘贴 JSON 时刻表或选择文件导入。校验失败时不会改动当前时刻表。</p>
+      <div class="form-row">
+        <input type="file" id="file-input" accept=".json,application/json">
+        <button id="sample-btn" type="button">填入示例数据</button>
+        <button id="import-btn" type="button" class="primary">导入</button>
+      </div>
+      <textarea id="import-text" rows="10" spellcheck="false"
+        placeholder='{"stations": [{"id": "...", "transfer_minutes": 5}], "trains": [...]}'></textarea>
+      <div id="import-result"></div>
+    </section>
+
+    <section class="card">
+      <h2>时刻表历史版本</h2>
+      <p class="hint">每次成功导入都会生成不可变版本。误导入不合适的时刻表后，
+        可在此恢复旧版：恢复会把旧版内容另存为新版本并设为当前，行程查询与站台分配立即生效。</p>
+      <div id="version-list"><p class="hint">版本加载中…</p></div>
+    </section>
+
+    <section class="card">
+      <h2>当前班次</h2>
+      <div id="train-list"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
